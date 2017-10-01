@@ -349,4 +349,4 @@ endif()
     endif()
 endif()
 
-qt5_use_modules(${PROJECT_NAME} Widgets)
+qt5_use_modules(nheko Widgets)
