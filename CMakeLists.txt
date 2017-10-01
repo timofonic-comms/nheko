@@ -17,7 +17,6 @@ fix_project_version()
 set(COMPANY "Mujx")
 set(COPYRIGHT "Copyright (c) 2017 mujx")
 set(IDENTIFIER "com.mujx.nheko")
-
 add_project_meta(META_FILES_TO_INCLUDE)
 
 #
