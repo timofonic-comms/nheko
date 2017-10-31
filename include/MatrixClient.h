@@ -100,6 +100,7 @@ private slots:
 
 private:
         enum class Endpoint {
+                CreateFilter,
                 GetOwnAvatar,
                 GetOwnProfile,
                 GetProfile,
@@ -120,6 +121,7 @@ private:
         // Response handlers.
         void onGetOwnAvatarResponse(QNetworkReply *reply);
         void onGetOwnProfileResponse(QNetworkReply *reply);
+        void onCreateFilterResponse(QNetworkReply *reply);
         void onImageResponse(QNetworkReply *reply);
         void onInitialSyncResponse(QNetworkReply *reply);
         void onImageUploadResponse(QNetworkReply *reply);
@@ -147,6 +149,9 @@ private:
 
         // Increasing transaction ID.
         int txn_id_;
+
+        // Filter to be used used for /sync
+        QString filter_;
 
         // Token to be used for the next sync.
         QString next_batch_;

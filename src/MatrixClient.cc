@@ -42,6 +42,7 @@ MatrixClient::MatrixClient(QString server, QObject *parent)
 {
         QSettings settings;
         txn_id_ = settings.value("client/transaction_id", 1).toInt();
+        filter_ = settings.value("client/filter", "").toString();
 
         connect(this, SIGNAL(finished(QNetworkReply *)), this, SLOT(onResponse(QNetworkReply *)));
 }
@@ -178,6 +179,37 @@ MatrixClient::onRegisterResponse(QNetworkReply *reply)
         } catch (DeserializationException &e) {
                 qWarning() << "Register" << e.what();
                 emit registerError("Received malformed response.");
+        }
+}
+
+void
+MatrixClient::onCreateFilterResponse(QNetworkReply *reply)
+{
+        reply->deleteLater();
+
+        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+        auto data = reply->readAll();
+
+        if (status == 0 || status >= 400) {
+                qWarning() << "Filter could not be created.";
+                qWarning() << "Error-body" << data;
+                // do nothing.
+                return;
+        }
+
+        auto json = QJsonDocument::fromJson(data);
+
+        if (json.isObject()) {
+                QJsonObject object = json.object();
+                if (object.contains("filter_id")) {
+                        filter_ = object.value("filter_id").toString();
+
+                        qDebug() << "Filter created. filter_id=" << filter_;
+
+                        QSettings settings;
+                        settings.setValue("client/filter", filter_);
+                }
         }
 }
 
@@ -508,6 +540,9 @@ MatrixClient::onResponse(QNetworkReply *reply)
         case Endpoint::Messages:
                 onMessagesResponse(reply);
                 break;
+        case Endpoint::CreateFilter:
+                onCreateFilterResponse(reply);
+                break;
         default:
                 break;
         }
@@ -570,13 +605,39 @@ MatrixClient::registerUser(const QString &user, const QString &pass, const QStri
 void
 MatrixClient::sync() noexcept
 {
-        QJsonObject filter{ { "room",
-                              QJsonObject{ { "ephemeral", QJsonObject{ { "limit", 0 } } } } },
-                            { "presence", QJsonObject{ { "limit", 0 } } } };
+        if (filter_.isEmpty()) {
+                QJsonObject filter{ { "room",
+                                      QJsonObject{
+                                        { "timeline", QJsonObject{ { "limit", 20 } } },
+                                        { "ephemeral", QJsonObject{ { "limit", 0 } } } } },
+                                    { "presence", QJsonObject{ { "limit", 0 } } } };
 
+                qWarning() << "filter is empty. Try uploading default filter";
+                filter_ = QJsonDocument(filter).toJson(QJsonDocument::Compact);
+
+                // Create filter on matrix server async. When the filter_id comes in
+                // it gets used internally and stored to settings
+
+                QSettings settings;
+                auto userid = settings.value("auth/user_id", "").toString();
+
+                QUrlQuery query;
+                query.addQueryItem("access_token", token_);
+
+                QUrl endpoint(server_);
+                endpoint.setPath(clientApiUrl_ + "/user/" + userid + "/filter");
+                endpoint.setQuery(query);
+
+                QNetworkRequest request(QString(endpoint.toEncoded()));
+                request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+                QNetworkReply *reply =
+                  post(request, QJsonDocument(filter).toJson(QJsonDocument::Compact));
+                reply->setProperty("endpoint", static_cast<int>(Endpoint::CreateFilter));
+        }
         QUrlQuery query;
         query.addQueryItem("set_presence", "online");
-        query.addQueryItem("filter", QJsonDocument(filter).toJson(QJsonDocument::Compact));
+        query.addQueryItem("filter", filter_);
         query.addQueryItem("timeout", "30000");
         query.addQueryItem("access_token", token_);
 
@@ -644,19 +705,12 @@ MatrixClient::sendRoomMessage(matrix::events::MessageEventType ty,
 void
 MatrixClient::initialSync() noexcept
 {
-        QJsonArray excluded_presence = {
-                QString("m.presence"),
-        };
-
-        QJsonObject filter{ { "room",
-                              QJsonObject{ { "timeline", QJsonObject{ { "limit", 20 } } },
-                                           { "ephemeral", QJsonObject{ { "limit", 0 } } } } },
-                            { "presence", QJsonObject{ { "not_types", excluded_presence } } } };
-
         QUrlQuery query;
         query.addQueryItem("full_state", "true");
         query.addQueryItem("set_presence", "online");
-        query.addQueryItem("filter", QJsonDocument(filter).toJson(QJsonDocument::Compact));
+        if (!filter_.isEmpty()) {
+                query.addQueryItem("filter", filter_);
+        }
         query.addQueryItem("access_token", token_);
 
         QUrl endpoint(server_);
